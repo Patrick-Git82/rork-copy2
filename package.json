@@ -3,9 +3,10 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "scripts": {
-    "start": "bunx rork start -p 6ndamrs18a3h7davmuxl5 --tunnel",
-    "start-web": "bunx rork start -p 6ndamrs18a3h7davmuxl5 --web --tunnel",
-    "start-web-dev": "DEBUG=expo* bunx rork start -p 6ndamrs18a3h7davmuxl5 --web --tunnel"
+    "start": "expo start",
+    "ios": "expo run:ios",
+    "android": "expo run:android",
+    "web": "expo start --web"
   },
   "dependencies": {
     "@expo/vector-icons": "^14.1.0",
@@ -15,6 +16,7 @@
     "@react-navigation/native": "^7.1.6",
     "@tanstack/react-query": "^5.83.0",
     "expo": "^53.0.4",
+    "expo-av": "^15.1.7",
     "expo-blur": "~14.1.4",
     "expo-constants": "~17.1.4",
     "expo-font": "~13.3.0",
@@ -37,6 +39,8 @@
     "react-dom": "19.0.0",
     "react-native": "0.79.1",
     "react-native-gesture-handler": "~2.24.0",
+    "react-native-maps": "^1.20.1",
+    "react-native-reanimated": "~3.17.4",
     "react-native-safe-area-context": "5.3.0",
     "react-native-screens": "~4.10.0",
     "react-native-svg": "15.11.2",
@@ -47,6 +51,7 @@
     "@babel/core": "^7.25.2",
     "@expo/ngrok": "^4.1.0",
     "@types/react": "~19.0.10",
+    "babel-plugin-module-resolver": "^5.0.2",
     "typescript": "~5.8.3"
   },
   "private": true

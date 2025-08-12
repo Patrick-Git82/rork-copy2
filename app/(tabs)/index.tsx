@@ -8,7 +8,7 @@ import Slider from "@react-native-community/slider";
 import { useSightsStore } from "@/stores/sights-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { SightCard } from "@/components/SightCard";
-import { MapView } from "@/components/MapView";
+import MapView from "@/components/MapView";
 import Colors from "@/constants/colors";
 import { SightTier } from "@/types/sight";
 

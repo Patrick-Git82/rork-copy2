@@ -1,9 +1,10 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-
+import { Platform } from "react-native";
 import { Sight, SightTier, SavedContent } from "@/types/sight";
 import { useSettingsStore } from "./settings-store";
+
 
 interface SightsState {
   sights: Sight[];
@@ -44,77 +45,94 @@ export const useSightsStore = create<SightsState>()(
         get().filterSightsByRadius();
       },
       
-      fetchNearbySights: async (latitude, longitude) => {
-        set({ loading: true });
-        
-        try {
-          const { googleMapsApiKey } = useSettingsStore.getState();
-          
-          if (!googleMapsApiKey) {
-            console.error("Google Maps API key is required. Please add it in Settings.");
-            set({ allSights: [], sights: [] });
-            return;
-          }
-          
-          // Use Google Places API to find nearby tourist attractions
-          const response = await fetch(
-            `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${latitude},${longitude}&radius=${get().radius * 1000}&type=tourist_attraction&key=${googleMapsApiKey}`
-          );
-          
-          if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-          }
-          
-          const data = await response.json();
-          
-          if (data.status !== "OK") {
-            throw new Error(`Google Places API error: ${data.status} - ${data.error_message || 'Unknown error'}`);
-          }
-          
-          const sightsWithDistance = data.results.map((place: any, index: number) => {
-            // Calculate distance using Haversine formula
-            const distance = calculateDistance(
-              latitude,
-              longitude,
-              place.geometry.location.lat,
-              place.geometry.location.lng
-            );
-            
-            const tier = get().determineSightTier(place.rating, place.user_ratings_total);
-            
-            return {
-              id: place.place_id || `place_${index}`,
-              name: place.name,
-              category: formatCategory(place.types?.[0]) || "Attraction",
-              latitude: place.geometry.location.lat,
-              longitude: place.geometry.location.lng,
-              distance: parseFloat(distance.toFixed(1)),
-              imageUrl: place.photos?.[0] 
-                ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference=${place.photos[0].photo_reference}&key=${googleMapsApiKey}`
-                : "https://images.unsplash.com/photo-1469474968028-56623f02e42e?q=80&w=2070&auto=format&fit=crop",
-              briefDescription: place.vicinity || "A notable attraction in the area",
-              fullDescription: place.vicinity || "A notable attraction in the area",
-              briefDescriptionDE: place.vicinity || "Eine bemerkenswerte Attraktion in der Gegend",
-              fullDescriptionDE: place.vicinity || "Eine bemerkenswerte Attraktion in der Gegend",
-              rating: place.rating,
-              placeId: place.place_id,
-              tier,
-            };
-          });
-          
-          // Sort by distance
-          const sortedSights = sightsWithDistance.sort((a: Sight, b: Sight) => (a.distance || 0) - (b.distance || 0));
-          
-          set({ allSights: sortedSights });
-          get().filterSightsByRadius();
-          
-        } catch (error) {
-          console.error("Error fetching sights:", error);
-          set({ allSights: [], sights: [] });
-        } finally {
-          set({ loading: false });
-        }
-      },
+fetchNearbySights: async (latitude: number, longitude: number) => {
+  set({ loading: true });
+
+  try {
+    const { googleMapsApiKey, language } = useSettingsStore.getState();
+
+    if (!googleMapsApiKey) {
+      console.error("Google Maps API key is required. Please add it in Settings.");
+      set({ allSights: [], sights: [] });
+      return;
+    }
+
+    // Clamp radius to a sensible range (Google max is 50km for nearbysearch)
+    const radiusMeters = Math.max(100, Math.min(50000, Math.round(get().radius * 1000)));
+
+    const baseUrl =
+      `https://maps.googleapis.com/maps/api/place/nearbysearch/json` +
+      `?location=${latitude},${longitude}` +
+      `&radius=${radiusMeters}` +
+      `&type=tourist_attraction` +
+      `&language=${language === "DE" ? "de" : "en"}` +
+      `&key=${googleMapsApiKey}`;
+
+    // On web, go through a CORS proxy. On device, call Google directly.
+    const url =
+      Platform.OS === "web"
+        ? `https://api.allorigins.win/get?url=${encodeURIComponent(baseUrl)}`
+        : baseUrl;
+
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+
+    const raw = await res.json();
+    const data = Platform.OS === "web" ? JSON.parse(raw.contents) : raw;
+
+    if (data.status !== "OK" && data.status !== "ZERO_RESULTS") {
+      throw new Error(`Google Places API error: ${data.status} - ${data.error_message || "Unknown error"}`);
+    }
+
+    const results: any[] = data?.results ?? [];
+
+    const sightsWithDistance = results.map((place: any, index: number) => {
+      // Distance via your helper
+      const distance = calculateDistance(
+        latitude,
+        longitude,
+        place.geometry.location.lat,
+        place.geometry.location.lng
+      );
+
+      const tier = get().determineSightTier(place.rating, place.user_ratings_total);
+
+      return {
+        id: place.place_id || `place_${index}`,
+        name: place.name,
+        category: formatCategory(place.types?.[0]) || "Attraction",
+        latitude: place.geometry.location.lat,
+        longitude: place.geometry.location.lng,
+        distance: parseFloat(distance.toFixed(1)),
+        imageUrl: place.photos?.[0]
+          ? // ✅ correct param name is photo_reference (not "photoreference")
+            `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${place.photos[0].photo_reference}&key=${googleMapsApiKey}`
+          : "https://images.unsplash.com/photo-1469474968028-56623f02e42e?q=80&w=2070&auto=format&fit=crop",
+        briefDescription: place.vicinity || "A notable attraction in the area",
+        fullDescription: place.vicinity || "A notable attraction in the area",
+        briefDescriptionDE: place.vicinity || "Eine bemerkenswerte Attraktion in der Gegend",
+        fullDescriptionDE: place.vicinity || "Eine bemerkenswerte Attraktion in der Gegend",
+        rating: place.rating,
+        placeId: place.place_id,
+        tier,
+      };
+    });
+
+    // Sort by distance and update state
+    const sortedSights = sightsWithDistance.sort(
+      (a: Sight, b: Sight) => (a.distance || 0) - (b.distance || 0)
+    );
+
+    set({ allSights: sortedSights });
+    get().filterSightsByRadius();
+  } catch (error) {
+    console.error("Error fetching sights:", error);
+    set({ allSights: [], sights: [] });
+  } finally {
+    set({ loading: false });
+  }
+},
+
       
       filterSightsByRadius: () => {
         get().filterSightsByTiers();
@@ -147,92 +165,68 @@ export const useSightsStore = create<SightsState>()(
         }
       },
       
-      generateSightContent: async (sight: Sight, language: string, length: string) => {
-        const { openAiApiKey, specialInterests, userName } = useSettingsStore.getState();
-        const interests = specialInterests || "general";
-        
-        // Check if we have saved content for this combination
-        const savedContent = get().getSavedContent(sight.id, language, length, interests);
-        if (savedContent) {
-          return savedContent.content;
-        }
-        
-        if (!openAiApiKey) {
-          // Fallback to existing content if no API key
-          return language === "EN" 
-            ? (length === "brief" ? sight.briefDescription : sight.fullDescription)
-            : (length === "brief" ? sight.briefDescriptionDE : sight.fullDescriptionDE);
-        }
-        
-        try {
-          let lengthDescription: string;
-          switch (length) {
-            case "brief":
-              lengthDescription = "brief (1 minute read, 2-3 sentences)";
-              break;
-            case "medium":
-              lengthDescription = "medium (2 minute read, 1 paragraph)";
-              break;
-            case "expert":
-              lengthDescription = "expert (5 minute read, 2-3 detailed paragraphs)";
-              break;
-            default:
-              lengthDescription = "medium (2 minute read, 1 paragraph)";
-          }
-          
-          let prompt = `Generate a ${lengthDescription} description about ${sight.name} in ${language === "EN" ? "English" : "German"}. Include historical facts, architectural details, and interesting information that would be valuable for tourists.`;
-          
-          // Add personalization based on user interests
-          if (specialInterests) {
-            prompt += ` The user is particularly interested in: ${specialInterests}. Please tailor the content to include relevant information about these interests where applicable.`;
-          }
-          
-          // Add user name for personalization if available
-          if (userName) {
-            prompt += ` Address the content as if speaking to ${userName}.`;
-          }
-          
-          prompt += " Make it engaging and informative.";
-          
-          const response = await fetch("https://toolkit.rork.com/text/llm/", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              messages: [
-                {
-                  role: "system",
-                  content: "You are a knowledgeable tour guide providing informative descriptions about tourist attractions and historical sites. Personalize your responses based on the user's interests and background."
-                },
-                {
-                  role: "user",
-                  content: prompt
-                }
-              ]
-            }),
-          });
-          
-          if (!response.ok) {
-            throw new Error("Failed to generate content");
-          }
-          
-          const data = await response.json();
-          const generatedContent = data.completion;
-          
-          // Save the generated content
-          get().saveSightContent(sight.id, language, length, interests, generatedContent);
-          
-          return generatedContent;
-          
-        } catch (error) {
-          console.error("Error generating content:", error);
-          // Fallback to existing content
-          return language === "EN" 
-            ? (length === "brief" ? sight.briefDescription : sight.fullDescription)
-            : (length === "brief" ? sight.briefDescriptionDE : sight.fullDescriptionDE);
-        }
+generateSightContent: async (sight: Sight, language: string, length: string) => {
+  const { openAiApiKey, specialInterests, userName } = useSettingsStore.getState();
+  const interests = specialInterests || "general";
+
+  // Reuse saved content if available
+  const saved = get().getSavedContent(sight.id, language, length, interests);
+  if (saved) return saved.content;
+
+  // No API key → fallback to built-in text
+  if (!openAiApiKey) {
+    return language === "EN"
+      ? (length === "brief" ? sight.briefDescription : sight.fullDescription)
+      : (length === "brief" ? sight.briefDescriptionDE : sight.fullDescriptionDE);
+  }
+
+  try {
+    const lengthText =
+      length === "brief" ? "1-minute" :
+      length === "medium" ? "2-minute" : "5-minute";
+
+    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${openAiApiKey}`,
       },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: "You are a knowledgeable, engaging tour guide." },
+          {
+            role: "user",
+            content:
+              `Write a ${lengthText} spoken narration about "${sight.name}". ` +
+              `Language: ${language === "DE" ? "German" : "English"}. ` +
+              (specialInterests ? `Focus on: ${specialInterests}. ` : "") +
+              (userName ? `Address the listener as ${userName}. ` : "") +
+              `No fluff; make it vivid, accurate, and easy to listen to.`
+          }
+        ],
+      }),
+    });
+
+    const json = await resp.json();
+    const generatedContent: string =
+      json?.choices?.[0]?.message?.content?.trim() ||
+      (language === "EN"
+        ? (length === "brief" ? sight.briefDescription : sight.fullDescription)
+        : (length === "brief" ? sight.briefDescriptionDE : sight.fullDescriptionDE));
+
+    // Save and return
+    get().saveSightContent(sight.id, language, length, interests, generatedContent);
+    return generatedContent;
+
+  } catch (err) {
+    console.error("Error generating content:", err);
+    return language === "EN"
+      ? (length === "brief" ? sight.briefDescription : sight.fullDescription)
+      : (length === "brief" ? sight.briefDescriptionDE : sight.fullDescriptionDE);
+  }
+},
+
       
       saveSightContent: (sightId, language, length, interests, content) => {
         const { sights, allSights } = get();
