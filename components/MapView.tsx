@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useRef } from "react";
 import { StyleSheet, View, Text, TouchableOpacity } from "react-native";
 import RNMapView, { Marker, PROVIDER_GOOGLE, Region } from "react-native-maps";
 import { MapPin, Crown, Star, Eye } from "lucide-react-native";
@@ -10,9 +10,10 @@ interface MapViewProps {
   sights: Sight[];
   userLocation: { latitude: number; longitude: number };
   onSightPress: (sightId: number | string) => void;
+  onRegionSettled?: (region: Region) => void; // NEW: report region
 }
 
-export default function SightsMap({ sights, userLocation, onSightPress }: MapViewProps) {
+export default function SightsMap({ sights, userLocation, onSightPress, onRegionSettled }: MapViewProps) {
   const region: Region = useMemo(
     () => ({
       latitude: userLocation.latitude,
@@ -23,6 +24,13 @@ export default function SightsMap({ sights, userLocation, onSightPress }: MapVie
     [userLocation]
   );
 
+  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+    function handleRegionChangeComplete(r: Region) {
+    if (!onRegionSettled) return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => onRegionSettled(r), 500);
+  }
+
   return (
     <View style={styles.container}>
       <RNMapView
@@ -31,6 +39,7 @@ export default function SightsMap({ sights, userLocation, onSightPress }: MapVie
         initialRegion={region}
         showsUserLocation
         showsMyLocationButton={false}
+        onRegionChangeComplete={handleRegionChangeComplete}
       >
         {sights.map((s) => {
           const TierIcon = getTierIcon(s.tier);

@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { StyleSheet, View, Text, Image, ScrollView, TouchableOpacity, Modal, Platform, ActivityIndicator, FlatList, Alert } from "react-native";
 import { useLocalSearchParams, Stack, useRouter } from "expo-router";
 import { Bookmark, BookmarkCheck, Volume2, Archive, Trash2, Calendar, Globe, Clock, Pause } from "lucide-react-native";
-import * as Speech from "expo-speech";
+// import * as Speech from "expo-speech"; // (no direct import; utils/tts will lazy-load expo-speech if needed)
 import * as Haptics from "expo-haptics";
+
+import { speakNatural, stopNatural } from "@/utils/tts";
 
 import { useSightsStore } from "@/stores/sights-store";
 import { useSettingsStore, AudioLength } from "@/stores/settings-store";
@@ -30,9 +32,7 @@ export default function SightDetailScreen() {
 
   useEffect(() => {
     return () => {
-      if (isSpeaking) {
-        Speech.stop();
-      }
+      if (isSpeaking) stopNatural();
     };
   }, [isSpeaking]);
 
@@ -56,28 +56,23 @@ export default function SightDetailScreen() {
 
   const startSpeech = async () => {
     setIsGenerating(true);
-    
     try {
-      const textToSpeak = await generateSightContent(sight, defaultLanguage, selectedLength);
-      setGeneratedContent(textToSpeak);
-      
-      const options = {
-        language: defaultLanguage === "EN" ? "en-US" : "de-DE",
+      const text = await generateSightContent(sight, defaultLanguage, selectedLength);
+      setGeneratedContent(text);
+      await speakNatural(text, {
         onStart: () => setIsSpeaking(true),
-        onDone: () => setIsSpeaking(false),
-        onStopped: () => setIsSpeaking(false),
-      };
-
-      Speech.speak(textToSpeak, options);
-    } catch (error) {
-      console.error("Error generating or speaking content:", error);
+        onEnd: () => setIsSpeaking(false),
+      });
+      
+    } catch (e) {
+      console.error("Error generating or speaking content:", e);
     } finally {
       setIsGenerating(false);
     }
   };
 
   const stopSpeech = () => {
-    Speech.stop();
+    stopNatural();
     setIsSpeaking(false);
   };
 
